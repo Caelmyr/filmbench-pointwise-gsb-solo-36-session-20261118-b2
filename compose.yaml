@@ -1,0 +1,10 @@
+name: solo39-filmbench
+services:
+  filmbench:
+    build: .
+    image: solo39-filmbench:1.0
+    ports: ["127.0.0.1:18939:18939"]
+    volumes: ["filmbench-data:/data"]
+    network_mode: bridge
+volumes:
+  filmbench-data:

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>FilmBench · 彩色负片工作台</title>
+  <link rel="stylesheet" href="/static/filmbench.css">
+  <script defer src="/static/filmbench.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="mark" aria-hidden="true"></span>FilmBench</a>
+    <span class="header-label">彩色负片工作台</span>
+    <div class="header-actions"><a href="/prepare">图像准备 ↗</a><button id="openImport" class="primary">导入扫描</button></div>
+  </header>
+  <main>
+    <aside class="library panel">
+      <h2>扫描工程</h2>
+      <div id="projects" class="projects"></div>
+      <button class="subtle" id="openArchive">恢复工程 ZIP</button>
+      <input id="archiveFile" type="file" accept=".zip,application/zip" hidden>
+      <h2>合成演示</h2>
+      <div id="demos" class="demos"></div>
+    </aside>
+
+    <section class="workspace" aria-label="影像工作区">
+      <div class="workspace-head">
+        <div><h1 id="projectTitle">工作区</h1><p id="projectMeta">选择演示或导入扫描</p></div>
+        <span id="revision" class="revision" hidden></span>
+      </div>
+      <div id="modeBar" class="mode-bar" role="group" aria-label="影像视图" hidden>
+        <button data-mode="positive" aria-pressed="true">正片</button>
+        <button data-mode="split" aria-pressed="false">原片 / 正片</button>
+        <button data-mode="source" aria-pressed="false">完整原片</button>
+        <button data-mode="density" aria-pressed="false">相对密度</button>
+        <button data-mode="clipping" aria-pressed="false">扫描截断</button>
+      </div>
+      <div id="stage" class="stage">
+        <div id="empty" class="empty">
+          <span class="mark" aria-hidden="true"></span>
+          <h2>从扫描到正片</h2>
+          <p>导入一张负片扫描，从透光片边取样后显影。</p>
+          <button id="loadHarbor" class="primary">载入港湾日落</button>
+        </div>
+        <div id="plate" class="plate" hidden>
+          <img id="viewImage" alt="当前扫描视图" draggable="false">
+          <img id="compareImage" alt="" draggable="false" hidden>
+          <span id="splitLine" class="split-line" hidden></span>
+          <svg id="overlay" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+      <div id="compareControl" class="compare-control" hidden>
+        <span>原片</span><input aria-label="原片显示比例" type="range" id="compareSlider" min="0" max="100" value="46"><span>正片</span>
+      </div>
+      <div id="toolBar" class="tool-bar" hidden>
+        <button data-tool="probe" aria-pressed="false">像素探针</button>
+        <button data-tool="base" aria-pressed="false">框选片基</button>
+        <button data-tool="crop" aria-pressed="false">框选画格</button>
+        <button data-tool="retouch" aria-pressed="false">点修补</button>
+        <button id="cancelTool" hidden>取消</button>
+        <label id="retouchSize" hidden>半径<input id="radius" type="number" value="9" min="2" max="64" step="1">px</label>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <div class="workspace-bottom" id="details" hidden>
+        <section class="panel histogram">
+          <div class="panel-head"><h2>直方图</h2>
+            <select id="histMode" aria-label="直方图来源"><option value="positive">画格正片</option><option value="source">完整扫描</option></select></div>
+          <canvas id="histogram" width="500" height="144" aria-label="RGB 直方图"></canvas>
+          <div class="hist-ends"><span>暗</span><span>亮</span></div>
+        </section>
+        <section class="panel inspect">
+          <div class="panel-head"><h2>像素检查</h2></div>
+          <div class="inspect-content">
+            <img id="loupe" alt="探针周围正片纹理放大" hidden>
+            <p id="probeValues">用像素探针点选完整原片，查看对应码值、正片和局部纹理。</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside class="inspector panel" aria-label="显影和输出">
+      <div id="settings" hidden>
+        <section>
+          <h2>片基</h2>
+          <label class="control">扫描编码<select id="encoding"><option value="srgb">sRGB</option><option value="linear">线性 RGB</option></select></label>
+          <div id="baseReading" class="reading">正在读取片基…</div>
+          <div class="small-buttons"><button id="sampleBase">选透光片边</button><button id="resetBase">从片边估计</button></div>
+        </section>
+        <section>
+          <div class="panel-head"><h2>正片显影</h2><button id="resetTone" class="subtle">重置</button></div>
+          <form id="toneForm">
+            <label class="control">黑点<input name="black" type="number" step=".01" min="0" max=".6" required></label>
+            <label class="control">白点<input name="white" type="number" step=".01" min=".35" max="3" required></label>
+            <label class="control">曝光<input name="exposure" type="number" step=".1" min="-3" max="3" required></label>
+            <label class="control">对比<input name="contrast" type="number" step=".05" min=".35" max="2.2" required></label>
+            <details><summary>通道微调</summary>
+              <label class="control rgb red">红<input name="red" type="number" step=".01" min="-.35" max=".35" required></label>
+              <label class="control rgb green">绿<input name="green" type="number" step=".01" min="-.35" max=".35" required></label>
+              <label class="control rgb blue">蓝<input name="blue" type="number" step=".01" min="-.35" max=".35" required></label>
+            </details>
+            <button id="applyTone" class="primary wide" type="submit">应用显影</button>
+          </form>
+        </section>
+        <section>
+          <h2>画格</h2>
+          <p class="reading" id="frameReading"></p>
+          <div class="small-buttons"><button id="rotate">顺时针 90°</button><button id="mirror" aria-pressed="false">镜像</button></div>
+          <div class="small-buttons"><button id="resetCrop">取消裁切</button><button id="resetRetouch">移除修补</button></div>
+        </section>
+        <section class="download">
+          <h2>导出</h2>
+          <a data-output="positive.png">正片 PNG <span>8 位 ↓</span></a>
+          <a data-output="positive.tif">正片 TIFF <span>16 位 ↓</span></a>
+          <a data-output="density.png">相对密度 PNG <span>16 位 ↓</span></a>
+          <a data-output="original">扫描原档 <span>↓</span></a>
+          <a data-output="project.zip">工程 ZIP <span>↓</span></a>
+        </section>
+      </div>
+    </aside>
+  </main>
+  <dialog id="importDialog">
+    <form id="importForm">
+      <div class="panel-head"><h2>导入扫描</h2><button type="button" id="closeImport" aria-label="关闭">×</button></div>
+      <label>扫描文件<input name="scan" type="file" accept=".png,.jpg,.jpeg,.tif,.tiff,image/png,image/jpeg,image/tiff" required></label>
+      <p>PNG、JPEG 或单页 TIFF，最大 28 MB、650 万像素。</p>
+      <label>工程名<input name="title" type="text" maxlength="100" placeholder="默认用文件名"></label>
+      <label>扫描编码<select name="encoding"><option value="srgb">sRGB</option><option value="linear">线性 RGB</option></select></label>
+      <p id="importError" role="alert"></p>
+      <button type="submit" class="primary wide">导入并显影</button>
+    </form>
+  </dialog>
+</body>
+</html>
