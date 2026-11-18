@@ -84,6 +84,12 @@ summary { cursor: pointer; color: var(--muted); }
 .download h2 { margin-bottom: 6px; }
 .download a { display: flex; justify-content: space-between; gap: 7px; padding: 6px 0; border-bottom: 1px solid #353832; font-size: .86rem; }
 .download span { color: var(--muted); }
+.clip-report .reading { font-size: .8rem; }
+.clip-blocks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.clip-blocks:empty { display: none; }
+.clip-blocks li { display: flex; gap: 8px; align-items: start; font-size: .82rem; color: var(--muted); }
+.clip-badge, .clip-label { flex: none; min-width: 1.25em; height: 1.25em; padding: 0 .25em; border-radius: 3px; display: inline-grid; place-items: center; font-size: .74rem; font-weight: 750; color: #171410; }
+.clip-label { height: auto; min-width: 1.35em; padding: .08em .28em; box-shadow: 0 0 0 1px #121412aa; pointer-events: none; }
 dialog { width: min(420px, calc(100vw - 30px)); border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); padding: 18px; }
 dialog::backdrop { background: #080908bc; }
 dialog label { display: grid; gap: 4px; margin-top: 9px; color: var(--muted); }

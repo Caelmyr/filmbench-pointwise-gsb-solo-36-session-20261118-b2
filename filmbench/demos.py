@@ -131,6 +131,23 @@ def make_demo(key):
         trans[236:252, 135:168, 0] = 1
         trans[413:437, 736:755, 2] = 0
         trans[474:477, 671:674] *= .09
+        # 一条又细又连续的红通道满量程截断线
+        trans[300, 220:460, 0] = 1
+        # 两片绿通道零值截断，中间只隔着几粒接近零值的颗粒（编码后码值 0/1），应认作同一处
+        trans[355:375, 250:300, 1] = 0
+        trans[355:375, 306:356, 1] = 0
+        bridge_green = (np.array([1, 0, 1, 1, 0, 1], dtype=np.float32) / 255 / 12.92)
+        trans[355:375, 300:306, 1] = bridge_green[None, :]
+        # 两片蓝通道满量程截断，中间窄缝仍有中间调细节，必须保留为两处
+        trans[520:560, 400:452, 2] = 1
+        trans[520:560, 466:518, 2] = 1
+        trans[520:560, 452:466, 2] = np.linspace(.18, .42, 14)[None, :]
+        # 零星坏点：互不相连且不成线，不应出现在截断清单里
+        rng_specks = np.random.default_rng(91)
+        for _ in range(14):
+            sx = int(rng_specks.integers(60, WIDTH - 60))
+            sy = int(rng_specks.integers(60, HEIGHT - 60))
+            trans[sy, sx, int(rng_specks.integers(0, 3))] = rng_specks.choice([0, 1])
         values = np.where(trans <= .0031308, trans * 12.92,
                           1.055 * trans ** (1 / 2.4) - .055)
         scan = np.rint(values * 255).astype(np.uint8)

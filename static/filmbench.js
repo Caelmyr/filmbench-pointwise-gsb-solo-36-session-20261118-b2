@@ -10,7 +10,13 @@ const modes = all("[data-mode]");
 const toneDefaults = {black: .04, white: 1.25, exposure: 0, contrast: 1, red: 0, green: 0, blue: 0};
 const viewLabels = {
   positive: "当前正片", split: "原片与正片同位对照", source: "完整扫描原片",
-  density: "当前画格相对密度", clipping: "完整扫描的通道截断标注"
+  density: "当前画格相对密度", clipping: "画格内的通道截断标注"
+};
+const clipKindText = {low: "零值", high: "满量程"};
+const clipChannelText = {R: "红通道", G: "绿通道", B: "蓝通道"};
+const clipColors = {
+  "R-low": "#ff6a70", "G-low": "#5fd07a", "B-low": "#7d9bff",
+  "R-high": "#ffb08a", "G-high": "#c2f59e", "B-high": "#b9cdff"
 };
 let active;
 let metrics;
@@ -92,6 +98,7 @@ function activate(project) {
   active = project;
   metrics = null;
   drawHistogram();
+  renderClipping(null);
   mode = "positive";
   probe = null;
   setTool(null);
@@ -124,13 +131,12 @@ function renderProject() {
   json(route() + "/metrics").then(report => {
     if (render !== viewVersion) return;
     metrics = report;
-    const {base, codes} = report;
+    const {base, clipping: clippingReport} = report;
     const source = base.mode === "selection" ? "手动取样" : "从片边估计";
     const clipped = base.clipped_fraction > .05 ? " · 选区含截断像素" : "";
     byId("baseReading").textContent = source + " · " + base.transmission.map(v => v.toFixed(3)).join(" / ") + clipped;
     byId("baseReading").title = "线性 RGB 透射率 · " + base.count.toLocaleString() + " 个样本";
-    modes.find(btn => btn.dataset.mode === "clipping").title =
-      "零值 " + codes.low.toLocaleString() + " px · 满量程 " + codes.high.toLocaleString() + " px · 双重 " + codes.both.toLocaleString() + " px";
+    renderClipping(clippingReport);
     drawHistogram();
   }).catch(error => {
     if (render === viewVersion) message(error.message, true);
@@ -138,7 +144,46 @@ function renderProject() {
 }
 
 function fullScan() {
-  return mode === "source" || mode === "clipping";
+  return mode === "source";
+}
+
+function renderClipping(report) {
+  const button = modes.find(btn => btn.dataset.mode === "clipping");
+  const summaryNode = byId("clipSummary");
+  const list = byId("clipBlocks");
+  list.replaceChildren();
+  if (!report) {
+    button.title = "";
+    summaryNode.textContent = "切换到“扫描截断”视图查看。";
+    return;
+  }
+  button.title = "零值 " + report.low.toLocaleString() + " px · 满量程 " + report.high.toLocaleString()
+    + " px · 双重 " + report.both.toLocaleString() + " px · 忽略零星坏点 " + report.ignored_specks.toLocaleString() + " px";
+  if (!report.block_count) {
+    summaryNode.textContent = "画格内没有成块的通道截断，零星坏点已忽略。";
+    return;
+  }
+  summaryNode.textContent = report.block_count + " 处截断 · 近极限容差 ±"
+    + report.near_band_codes + " 码值（仅用于桥接同一处）· 已忽略 "
+    + report.ignored_specks.toLocaleString() + " 个零星坏点";
+  for (const block of report.blocks) {
+    const item = document.createElement("li");
+    const badge = document.createElement("span");
+    badge.className = "clip-badge";
+    badge.textContent = block.id;
+    badge.style.background = clipColors[block.channel + "-" + block.kind];
+    const text = document.createElement("span");
+    const type = clipChannelText[block.channel] + " · " + clipKindText[block.kind]
+      + (block.thin_line ? " · 细线" : "") + " · " + block.area.toLocaleString() + " px";
+    const detail = block.near_pixels
+      ? "（含 " + block.near_pixels.toLocaleString() + " 个近极限颗粒，已并入同一处）"
+      : "";
+    text.textContent = type + detail;
+    text.title = "画格坐标 (" + block.x + ", " + block.y + ") 起，" + block.width + " × " + block.height
+      + " px · 精确截断 " + block.exact_pixels.toLocaleString() + " px";
+    item.append(badge, text);
+    list.append(item);
+  }
 }
 
 function drawView() {
@@ -201,7 +246,7 @@ function setMode(next) {
   if (tool) setTool(null);
   mode = next;
   drawView();
-  if (next === "clipping") message("蓝色表示有通道读到零值，橙红表示有通道达到满量程，紫色表示同点同时存在两类截断。");
+  if (next === "clipping") message("标注跟随已裁切、转正的画格。暗色块为该通道读到零值，亮色块为达到满量程；编号与右侧清单对应。浅色颗粒只作桥接，零星坏点不标注。");
   else if (next === "density") message("由当前片基测算的相对密度。显示与下载统一映射 0 至 1.6 密度单位。");
   else message();
 }
@@ -232,9 +277,36 @@ function setTool(next) {
 
 function drawOverlay() {
   overlay.replaceChildren();
-  if (!active || !fullScan()) return;
+  if (!active) return;
+  if (mode === "clipping") {
+    const [width, height] = active.frame_size;
+    overlay.setAttribute("viewBox", "0 0 " + width + " " + height);
+    const blocks = metrics?.clipping?.blocks ?? [];
+    for (const block of blocks) {
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", block.x - .5);
+      rect.setAttribute("y", block.y - .5);
+      rect.setAttribute("width", block.width + 1);
+      rect.setAttribute("height", block.height + 1);
+      rect.setAttribute("fill", "none");
+      rect.setAttribute("stroke", clipColors[block.channel + "-" + block.kind]);
+      rect.setAttribute("stroke-width", 1.5);
+      rect.setAttribute("vector-effect", "non-scaling-stroke");
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", block.centroid_x);
+      label.setAttribute("y", block.centroid_y);
+      label.setAttribute("class", "clip-label");
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("dominant-baseline", "central");
+      label.textContent = block.id;
+      group.append(rect, label);
+      overlay.append(group);
+    }
+    return;
+  }
+  if (!fullScan()) return;
   overlay.setAttribute("viewBox", "0 0 " + active.size.join(" "));
-  if (mode === "clipping") return;
   const {base_region: baseRegion, crop, retouch} = active.settings;
   function shape(tag, attrs) {
     const node = document.createElementNS("http://www.w3.org/2000/svg", tag);

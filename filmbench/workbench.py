@@ -6,7 +6,7 @@ import numpy as np
 from image_lab.validation import Invalid
 
 from .density import check_region, density_view, develop, relative_density, sample_base
-from .diagnostics import clipping, overlay, rounded, summary
+from .diagnostics import (clipping_analysis, frame_maps, overlay, rounded, summary)
 from .frame import apply_retouch, prepared
 from .scan import compact, decode, display_rgb, png_rgb, tiff_rgb
 from .settings import point
@@ -24,6 +24,11 @@ class Workbench:
     def scan(self, project_id):
         return decode(self.projects.raw(project_id))
 
+    @lru_cache(maxsize=3)
+    def analysis(self, project_id):
+        scan = self.scan(project_id)
+        return clipping_analysis(scan.codes, scan.maximum)
+
     def check_setting(self, project_id, settings):
         check_region(self.scan(project_id).codes, settings['base_region'])
 
@@ -39,20 +44,30 @@ class Workbench:
     def preview(self, project, view):
         settings = project['settings']
         scan = self.scan(project['id'])
-        if view in ('source', 'reference', 'clipping'):
+        if view == 'source':
             source = scan.linear(settings['encoding'])
-            if view == 'clipping':
-                source = overlay(source, *clipping(scan.codes, scan.maximum))
-            elif view == 'reference':
-                source = prepared(source, settings, scan.size)
             return png_rgb(display_rgb(compact(source)))
+        if view == 'clipping':
+            return self._clipping_preview(project)
         if view not in VIEWS:
             raise Invalid('无法识别预览模式')
         scan, _, _, density, positive = self.develop(project)
+        if view == 'reference':
+            source = prepared(scan.linear(settings['encoding']), settings, scan.size)
+            return png_rgb(display_rgb(compact(source)))
         if view == 'density':
             grey = compact(prepared(density_view(density), settings, scan.size))
             return png_rgb(display_rgb(np.repeat(grey[..., None], 3, axis=2)))
         return png_rgb(display_rgb(compact(prepared(positive, settings, scan.size))))
+
+    def _clipping_preview(self, project):
+        settings = project['settings']
+        scan = self.scan(project['id'])
+        source = scan.linear(settings['encoding'])
+        exact, near, _ = frame_maps(self.analysis(project['id']), settings, scan.size)
+        framed = prepared(source, settings, scan.size)
+        marked = overlay(framed, exact, near)
+        return png_rgb(display_rgb(compact(marked)))
 
     def download(self, project, name):
         if name not in OUTPUTS:
@@ -74,7 +89,10 @@ class Workbench:
     def metrics(self, project):
         scan, source, base, density, positive = self.develop(project)
         positive = prepared(positive, project['settings'], scan.size)
-        return summary(scan, base, source, density, positive)
+        analysis = self.analysis(project['id'])
+        _, _, framed_blocks = frame_maps(analysis, project['settings'], scan.size)
+        framed_analysis = {**analysis, 'blocks': framed_blocks}
+        return summary(scan, base, source, density, positive, framed_analysis)
 
     def probe(self, project, coords):
         x, y = point(coords, project['size'], '像素探针')
@@ -86,7 +104,7 @@ class Workbench:
                 'clipped_channels': np.any([codes == 0, codes == scan.maximum], axis=0).tolist()}
 
     def loupe(self, project, coords):
-        x, y = point(coords, project['size'], '纹理放大镜')
+        x, y = point(coords, project['size'], '像素探针')
         _, _, _, _, positive = self.develop(project)
         width, height = project['size']
         crop = positive[max(0, y - 16):min(y + 17, height), max(0, x - 16):min(x + 17, width)]
