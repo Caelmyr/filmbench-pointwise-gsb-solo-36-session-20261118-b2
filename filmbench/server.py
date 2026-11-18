@@ -30,7 +30,8 @@ def register(app, data_dir):
         return jsonify({'ok': True, 'workspace': 'FilmBench'})
 
     def info(project):
-        return {**project, 'frame_size': frame_size(project['settings'], project['size'])}
+        return {**project, 'frame_size': frame_size(project['settings'], project['size']),
+                'retouch_view': workbench.retouch_marks(project)}
 
     def uploaded(name, maximum, label):
         data = request.files.get(name)
@@ -77,6 +78,15 @@ def register(app, data_dir):
             raise Invalid('更改需包含当前工程修订号和设置')
         project = projects.edit(project_id, document['version'], document['changes'],
                                 lambda settings: workbench.check_setting(project_id, settings))
+        return jsonify(info(project))
+
+    @film.post('/projects/<project_id>/retouch')
+    def retouch(project_id):
+        document = request.get_json(silent=True)
+        if not isinstance(document, dict) or set(document) != {'version', 'change'}:
+            raise Invalid('修补需包含当前工程修订号和来源、目标、半径')
+        project = workbench.retouch(projects.load(project_id), document['version'],
+                                    document['change'])
         return jsonify(info(project))
 
     def image(data, kind='image/png', download=None):

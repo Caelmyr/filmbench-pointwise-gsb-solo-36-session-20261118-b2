@@ -7,9 +7,9 @@ from image_lab.validation import Invalid
 
 from .density import check_region, density_view, develop, relative_density, sample_base
 from .diagnostics import clipping, overlay, rounded, summary
-from .frame import apply_retouch, prepared
+from .frame import apply_retouch, frame_size, frame_to_scan, prepared, scan_to_frame
 from .scan import compact, decode, display_rgb, png_rgb, tiff_rgb
-from .settings import point
+from .settings import clone_setting, point
 
 
 VIEWS = ('source', 'reference', 'positive', 'density', 'clipping')
@@ -27,14 +27,52 @@ class Workbench:
     def check_setting(self, project_id, settings):
         check_region(self.scan(project_id).codes, settings['base_region'])
 
+    def retouch_marks(self, project):
+        change = project['settings']['retouch']
+        if not change:
+            return None
+        size = project['size']
+        settings = project['settings']
+        return {'radius': change['radius'],
+                'source': scan_to_frame(change['source'], settings, size),
+                'target': scan_to_frame(change['target'], settings, size)}
+
+    @staticmethod
+    def interior(settings, size):
+        x0, y0, x1, y1 = settings['crop'] or [0, 0, *size]
+        height, width = size[1], size[0]
+        inside = np.zeros((height, width), np.uint8)
+        inside[y0:y1, x0:x1] = 1
+        return inside
+
     def develop(self, project):
         settings = project['settings']
         scan = self.scan(project['id'])
         source = scan.linear(settings['encoding'])
         base = sample_base(source, scan.codes, scan.maximum, settings['base_region'])
         density = relative_density(source, base['transmission'])
-        positive = apply_retouch(develop(density, settings['tone']), settings['retouch'])
+        interior = self.interior(settings, scan.size)
+        positive = apply_retouch(develop(density, settings['tone']),
+                                 settings['retouch'], interior)
         return scan, source, base, density, positive
+
+    def retouch(self, project, version, frame_change):
+        settings = project['settings']
+        size = project['size']
+        fields = ('source', 'target', 'radius')
+        if not isinstance(frame_change, dict) or set(frame_change) != set(fields):
+            raise Invalid('修补需要来源、目标和半径')
+        scan_change = {
+            'source': frame_to_scan(point(frame_change['source'], frame_size(settings, size), '修补来源'),
+                                    settings, size),
+            'target': frame_to_scan(point(frame_change['target'], frame_size(settings, size), '修补目标'),
+                                    settings, size),
+            'radius': frame_change['radius'],
+        }
+        # 用原片坐标复用同一套校验，保证存档设置与历史工程完全同构。
+        clone_setting(scan_change, size)
+        return self.projects.edit(project['id'], version, {'retouch': scan_change},
+                                  lambda next_settings: self.check_setting(project['id'], next_settings))
 
     def preview(self, project, view):
         settings = project['settings']

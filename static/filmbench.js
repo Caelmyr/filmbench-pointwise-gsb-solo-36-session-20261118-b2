@@ -214,13 +214,16 @@ function setTool(next) {
   for (const button of tools) button.setAttribute("aria-pressed", String(button.dataset.tool === tool));
   byId("cancelTool").hidden = !tool;
   byId("retouchSize").hidden = tool !== "retouch";
-  if (tool) {
+  if (tool === "retouch") {
+    mode = "positive";
+    drawView();
+    message("在当前正片上先点一块干净区域作为来源，再点要去掉的灰尘。贴近画格边的灰尘不会带入橙色片边。");
+  } else if (tool) {
     mode = "source";
     drawView();
     const hints = {
       base: "在完整原片上拖框，选一块没有画面的透光片边。",
       crop: "从任意一角拖到对角选出画格。此框记录在完整原片上。",
-      retouch: "依次点选一块干净的来源和要修补的目标。",
       probe: "点击完整原片中的位置，读取原始码值和对应的正片像素。"
     };
     message(hints[tool]);
@@ -232,8 +235,8 @@ function setTool(next) {
 
 function drawOverlay() {
   overlay.replaceChildren();
-  if (!active || !fullScan()) return;
-  overlay.setAttribute("viewBox", "0 0 " + active.size.join(" "));
+  if (!active) return;
+  overlay.setAttribute("viewBox", "0 0 " + (fullScan() ? active.size : active.frame_size).join(" "));
   if (mode === "clipping") return;
   const {base_region: baseRegion, crop, retouch} = active.settings;
   function shape(tag, attrs) {
@@ -251,20 +254,28 @@ function drawOverlay() {
     shape("circle", {cx: coords[0] + .5, cy: coords[1] + .5, r: radius,
       fill: "none", stroke: color, "stroke-width": 1.5});
   }
-  if (baseRegion) box(baseRegion, "#91d6af", false);
-  if (crop) box(crop, "#f9d79d", true);
-  if (tool === "retouch" && retouch) {
-    marker(retouch.source, "#91d6af", retouch.radius);
-    marker(retouch.target, "#f9ba9f", retouch.radius);
+  if (fullScan()) {
+    if (baseRegion) box(baseRegion, "#91d6af", false);
+    if (crop) box(crop, "#f9d79d", true);
+    if (tool === "retouch" && retouch) {
+      marker(retouch.source, "#91d6af", retouch.radius);
+      marker(retouch.target, "#f9ba9f", retouch.radius);
+    }
+    if (probe && tool === "probe") marker(probe, "#ebf6f3");
+    if (selection) box(regionBetween(selection.start, selection.end), "#e0f1da", false);
+  } else if (tool === "retouch") {
+    const marks = active.retouch_view;
+    if (marks) {
+      marker(marks.source, "#91d6af", marks.radius);
+      marker(marks.target, "#f9ba9f", marks.radius);
+    }
+    if (firstClone) marker(firstClone, "#91d6af", Number(byId("radius").value));
   }
-  if (firstClone) marker(firstClone, "#91d6af");
-  if (probe && tool === "probe") marker(probe, "#ebf6f3");
-  if (selection) box(regionBetween(selection.start, selection.end), "#e0f1da", false);
 }
 
 function imagePoint(event) {
   const box = plate.getBoundingClientRect();
-  const [width, height] = active.size;
+  const [width, height] = fullScan() ? active.size : active.frame_size;
   const x = Math.floor((event.clientX - box.left) / box.width * width);
   const y = Math.floor((event.clientY - box.top) / box.height * height);
   return [Math.max(0, Math.min(width - 1, x)), Math.max(0, Math.min(height - 1, y))];
@@ -284,11 +295,10 @@ function startSelection(event) {
   } else if (tool === "retouch") {
     if (!firstClone) {
       firstClone = coords;
-      message("修补来源已选。请点选要覆盖的目标。");
+      message("修补来源已选。请点要去掉的灰尘（目标）。");
       drawOverlay();
     } else {
-      const change = {source: firstClone, target: coords, radius: Number(byId("radius").value)};
-      saveSettings({retouch: change}, "已应用点修补。", "positive");
+      applyRetouch({source: firstClone, target: coords, radius: Number(byId("radius").value)});
     }
   } else {
     selection = {start: coords, end: coords};
@@ -332,6 +342,26 @@ async function updateProbe() {
       + " · 正片 " + result.positive.join(" / ") + (result.clipped_channels.some(Boolean) ? " · 含截断" : "");
   } catch (error) {
     if (probe === point && active === saved) message(error.message, true);
+  }
+}
+
+async function applyRetouch(change) {
+  if (!active || busy) return;
+  busy = true;
+  try {
+    active = await json(route() + "/retouch", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({version: active.version, change})});
+    setTool(null);
+    mode = "positive";
+    fillProject();
+    renderProject();
+    message("已应用点修补：沿用目标周围的亮暗渐变，只从来源借用细颗粒。");
+  } catch (error) {
+    message(error.message, true);
+  } finally {
+    busy = false;
+    firstClone = null;
   }
 }
 
